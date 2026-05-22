@@ -7,6 +7,18 @@ from flask_socketio import SocketIO, emit
 import mediapipe as mp
 from tensorflow.keras.models import load_model
 
+# Importamos el gestor de traducción del buffer de señas
+import sign_buffer_manager
+
+# Callback que se ejecuta cuando el temporizador de silencio expira y Gemini traduce las glosas
+def enviar_traduccion_a_frontend(frase_traducida):
+    print(f"[Socket.IO] Enviando traducción final: {frase_traducida}")
+    socketio.emit('translation_result', {'sentence': frase_traducida})
+
+# Conectamos nuestro buffer con la función emisora de Socket.IO
+sign_buffer_manager.callback_on_translation = enviar_traduccion_a_frontend
+
+
 # Flask and Socket.IO Configuration 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -137,6 +149,10 @@ def handle_video_frame(data):
                 # Sign confirmed — emit it and reset so the next sign starts fresh
                 prediction_result['word'] = word
                 prediction_result['confidence'] = int(confidence * 100)
+                
+                # Enviamos la palabra detectada al gestor de traducción
+                sign_buffer_manager.add_word(word)
+                
                 client_data[sid]['sequence'] = []
                 client_data[sid]['consecutive_count'] = 0
 

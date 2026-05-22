@@ -22,6 +22,18 @@ function App() {
   const socketRef = useRef(null);                             // Socket reference
   const isProcessingRef = useRef(false);                      // Control de bloqueo para no saturar al servidor
 
+  // Referencias para evitar clausuras obsoletas en los eventos de Socket.IO
+  const isAiVoiceActiveRef = useRef(isAiVoiceActive);
+  const selectedVoiceRef = useRef(selectedVoice);
+
+  useEffect(() => {
+    isAiVoiceActiveRef.current = isAiVoiceActive;
+  }, [isAiVoiceActive]);
+
+  useEffect(() => {
+    selectedVoiceRef.current = selectedVoice;
+  }, [selectedVoice]);
+
   useEffect(() => {
     const startVideo = async () => {
       try {
@@ -47,6 +59,39 @@ function App() {
       setConfidence(data.confidence);
       setLandmarks(data.landmarks);
       isProcessingRef.current = false; // Liberamos el bloqueo al recibir respuesta
+    });
+
+    // Escuchamos la traducción completa de Gemini
+    socketRef.current.on('translation_result', (data) => {
+      setSentence(data.sentence);
+      
+      // Si la voz de la IA está activa, lee la frase traducida de forma automática
+      if (isAiVoiceActiveRef.current) {
+        const voiceName = selectedVoiceRef.current === 'female'
+          ? 'es-ES-Neural2-A'
+          : 'es-ES-Neural2-B';
+
+        fetch(
+          `https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaSyBeaMCV7iPxCScoTYAw7jVrtE9cu3s8XxA`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input: { text: data.sentence },
+              voice: { languageCode: 'es-ES', name: voiceName },
+              audioConfig: { audioEncoding: 'MP3' }
+            })
+          }
+        )
+        .then(res => res.json())
+        .then(resData => {
+          if (resData.audioContent) {
+            const audio = new Audio(`data:audio/mp3;base64,${resData.audioContent}`);
+            audio.play();
+          }
+        })
+        .catch(err => console.error("Error autoplacing TTS:", err));
+      }
     });
 
     return () => {
@@ -124,17 +169,8 @@ function App() {
 
   // IA Text-to-Speech Voice
   useEffect(() => {
-    const ignored = ["...", "Esperando IA...", "IA desactivada", "(Reposo)"];
-    if (isAiActive && subtitle && !ignored.includes(subtitle)) {
-      setSentence(prev => {
-        const words = prev.trim().split(' ');
-        const lastWord = words[words.length - 1];
-        if (lastWord !== subtitle) {
-          return prev ? `${prev} ${subtitle}` : subtitle;
-        }
-        return prev;
-      });
-    }
+    // La frase acumulada ahora se maneja directamente por el servidor y Gemini,
+    // por lo que no es necesario acumular glosas de forma cruda en el frontend.
   }, [subtitle]);
 
   // Función para llamar a Google TTS

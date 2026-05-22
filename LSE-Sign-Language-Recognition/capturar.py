@@ -4,8 +4,8 @@ import numpy as np
 import os
 import time
 
-ACCION_A_GRABAR = "¿Cuál es tu nombre"  # Word to record
-DATA_PATH = f"C:/TFG/LSE-Sign-Language-Recognition/Database_propio/{ACCION_A_GRABAR}"
+ACCION_A_GRABAR = "Yo"  # Word to record
+DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio/{ACCION_A_GRABAR}"
 
 if not os.path.exists(DATA_PATH):
     os.makedirs(DATA_PATH)

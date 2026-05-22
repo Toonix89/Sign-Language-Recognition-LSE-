@@ -8,7 +8,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.model_selection import train_test_split
 
 
-DATA_PATH = "C:/TFG/LSE-Sign-Language-Recognition/Database_propio"
+DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio"
 MAX_FRAMES = 30 
 NUM_FEATURES = 126 # 21 points * 3 coords * 2 hands
 AUGMENTATION_MULTIPLIER = 2 # For each real file, we will generate "x" extra
@@ -90,7 +90,7 @@ X = np.array(sequences)
 y = to_categorical(labels).astype(int)
 
 # Save label map for use in translate.py
-OUTPUT_PATH = "C:/TFG/LSE-Sign-Language-Recognition"
+OUTPUT_PATH = "C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition"
 np.save(os.path.join(OUTPUT_PATH, "label_map_propio.npy"), label_map)
 
 print(f"Datos cargados. X shape: {X.shape}, y shape: {y.shape}")
