@@ -32,7 +32,7 @@ model = load_model('bilstm_model.h5')
 
 if os.path.exists('label_map_propio.npy'):
     label_map = np.load('label_map_propio.npy', allow_pickle=True).item()
-    list_actions = {v: k for k, v in label_map.items()}
+    list_actions = {v: k for k, v in label_map.items()} # Dar la vuelta al diccionario (HOLA: 0 -> 0: HOLA)
     print(f"Words trained: {list(list_actions.values())}")
 else:
     print("ERROR: label_map_propio.npy not found.")
@@ -43,7 +43,7 @@ threshold = 0.7
 MAX_FRAMES = 30
 MIN_CONSECUTIVE = 5  # Predictions in a row required to confirm a sign
 
-# Dictionary to store sequence AND MediaPipe instance per client (sid)
+# Dictionary multi-user support
 client_data = {}
 
 def process_frame(frame_bytes, hands_instance):
@@ -101,7 +101,7 @@ def handle_disconnect():
     sid = request.sid
     print(f"Client disconnected: {sid}")
     if sid in client_data:
-        client_data[sid]['hands'].close()  # Free MediaPipe resources
+        client_data[sid]['hands'].close()  # Free MediaPipe resources (si lo eliminase sin antes liberar(close()), se quedaría en la memoria consumiendo RAM)
         del client_data[sid]
 
 @socketio.on('video_frame')

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, Video, VideoOff, Settings, Hand, PhoneOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Settings, Hand } from 'lucide-react';
 import { io } from 'socket.io-client';
+
 function App() {
-  const videoRef = useRef(null);                              // Reference to the video element
+  const videoRef = useRef(null);                             // Reference to the video element
   const [showSettings, setShowSettings] = useState(false);    // State of settings panel
   const [isMuted, setIsMuted] = useState(false);              // State of microphone 
   const [isCameraOff, setIsCameraOff] = useState(false);      // State of camera 
@@ -10,7 +11,7 @@ function App() {
   const [isAiVoiceActive, setIsAiVoiceActive] = useState(false); // State of AI Voice
   const [selectedVoice, setSelectedVoice] = useState('male'); // State of selected voice
   const [showMesh, setShowMesh] = useState(true);             // Mediapipe points
-  const [showConfidence, setShowConfidence] = useState(true); // % Precision
+  const [showConfidence, setShowConfidence] = useState(true); // % Confidence precision
   const [showSubtitle, setShowSubtitle] = useState(true);     // Subtitles
   const [confidence, setConfidence] = useState(0);           // Precision value
   const [subtitle, setSubtitle] = useState("Esperando IA..."); // Subtitle value
@@ -20,9 +21,8 @@ function App() {
   const canvasRef = useRef(null);                             // Hidden canvas for extracting frames
   const overlayRef = useRef(null);                            // Canvas for drawing mesh
   const socketRef = useRef(null);                             // Socket reference
-  const isProcessingRef = useRef(false);                      // Control de bloqueo para no saturar al servidor
+  const isProcessingRef = useRef(false);                      // Prevent overload
 
-  // Referencias para evitar clausuras obsoletas en los eventos de Socket.IO
   const isAiVoiceActiveRef = useRef(isAiVoiceActive);
   const selectedVoiceRef = useRef(selectedVoice);
 
@@ -47,8 +47,7 @@ function App() {
     };
 
     startVideo();
-
-  }, []); // [] Start the video once when components loads
+  }, []);
 
   // Socket.IO Connection
   useEffect(() => {
@@ -58,14 +57,12 @@ function App() {
       setSubtitle(data.word);
       setConfidence(data.confidence);
       setLandmarks(data.landmarks);
-      isProcessingRef.current = false; // Liberamos el bloqueo al recibir respuesta
+      isProcessingRef.current = false;
     });
 
-    // Escuchamos la traducción completa de Gemini
     socketRef.current.on('translation_result', (data) => {
       setSentence(data.sentence);
-      
-      // Si la voz de la IA está activa, lee la frase traducida de forma automática
+
       if (isAiVoiceActiveRef.current) {
         const voiceName = selectedVoiceRef.current === 'female'
           ? 'es-ES-Neural2-A'
@@ -83,14 +80,14 @@ function App() {
             })
           }
         )
-        .then(res => res.json())
-        .then(resData => {
-          if (resData.audioContent) {
-            const audio = new Audio(`data:audio/mp3;base64,${resData.audioContent}`);
-            audio.play();
-          }
-        })
-        .catch(err => console.error("Error autoplacing TTS:", err));
+          .then(res => res.json())
+          .then(resData => {
+            if (resData.audioContent) {
+              const audio = new Audio(`data:audio/mp3;base64,${resData.audioContent}`);
+              audio.play();
+            }
+          })
+          .catch(err => console.error("Error autoplacing TTS:", err));
       }
     });
 
@@ -104,16 +101,14 @@ function App() {
     let interval;
     if (isAiActive && !isCameraOff) {
       interval = setInterval(() => {
-        // If server is processing previous frame, skip this one
         if (isProcessingRef.current) return;
 
         if (videoRef.current && canvasRef.current) {
           const video = videoRef.current;
           const canvas = canvasRef.current;
           if (video.videoWidth > 0) {
-            isProcessingRef.current = true; // Block until server responds
+            isProcessingRef.current = true;
 
-            // Reduce video resolution drastically to speed up sending and processing
             const MAX_WIDTH = 480;
             const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
             canvas.width = video.videoWidth * scale;
@@ -122,7 +117,6 @@ function App() {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Use strong JPEG compression (0.4) to lighten Base64
             const base64Frame = canvas.toDataURL('image/jpeg', 0.4);
             if (socketRef.current) {
               socketRef.current.emit('video_frame', base64Frame);
@@ -131,7 +125,7 @@ function App() {
             }
           }
         }
-      }, 50); // Evaluate every 50ms, but only send if free
+      }, 50);
     } else if (!isAiActive) {
       setSubtitle("IA desactivada");
       setLandmarks([]);
@@ -156,10 +150,9 @@ function App() {
 
     if (showMesh && landmarks.length > 0) {
       landmarks.forEach(hand => {
-        ctx.fillStyle = '#06b6d4'; // cyan-500
+        ctx.fillStyle = '#06b6d4';
         hand.landmarks.forEach(lm => {
           ctx.beginPath();
-          // lm.x and lm.y are normalized [0, 1]
           ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
           ctx.fill();
         });
@@ -167,13 +160,6 @@ function App() {
     }
   }, [landmarks, showMesh]);
 
-  // IA Text-to-Speech Voice
-  useEffect(() => {
-    // La frase acumulada ahora se maneja directamente por el servidor y Gemini,
-    // por lo que no es necesario acumular glosas de forma cruda en el frontend.
-  }, [subtitle]);
-
-  // Función para llamar a Google TTS
   const speakSentence = async () => {
     if (!sentence.trim()) return;
 
@@ -200,12 +186,11 @@ function App() {
   };
 
   return (
-    <div className="h-screen bg-zinc-950 text-white flex flex-col font-sans overflow-hidden pb-8">
+    <div className="h-screen bg-zinc-950 text-white flex flex-col font-sans overflow-hidden">
       {/* Header */}
       <header className="p-4 border-b border-white/10 flex justify-between items-center bg-zinc-900/50">
         <h1 className="text-xl font-bold text-cyan-400">Sign-link traductor</h1>
         <div className="flex items-center gap-4">
-          {/* Settings Button */}
           <button
             onClick={() => setShowSettings(!showSettings)}
             className={`p-2 rounded-lg transition-all ${showSettings ? 'bg-cyan-600' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
@@ -216,44 +201,44 @@ function App() {
       </header>
 
       {/* Main Video Area */}
-      <div className="flex-1 p-6 flex items-center justify-center bg-black relative">
-        <main className="flex-1 px-6 pt-6 pb-2 flex items-center justify-center bg-black relative">
-          <div className={`relative w-full max-w-4xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 border-2 ${isAiActive
+      <div className="flex-1 min-h-0 p-4 flex bg-black relative justify-center items-center">
+        <main className="flex-1 h-full min-h-0 flex items-center justify-center relative">
+
+          {/* Video */}
+          <div className={`relative aspect-video max-w-6xl max-h-full w-auto h-auto bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 border-2 ${isAiActive
             ? 'border-cyan-500 shadow-[0_0_30px_rgba(6,182,212,0.3)]'
             : 'border-white/5'
             }`}>
 
-            {/* The video tag where your face will be displayed */}
             <video
               ref={videoRef}
               autoPlay
               playsInline
               className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : 'block'}`}
-              style={{ transform: 'scaleX(-1)' }} // Mirrored
+              style={{ transform: 'scaleX(-1)' }}
             />
 
-            {/* Hidden canvas to extract frames */}
             <canvas ref={canvasRef} className="hidden" />
 
-            {/* Overlay canvas to draw hand landmarks */}
             <canvas
               ref={overlayRef}
               className={`absolute top-0 left-0 w-full h-full object-cover pointer-events-none ${isCameraOff ? 'hidden' : 'block'}`}
-            // No longer mirrored here because the coordinates from server.py are already mirrored
             />
 
-            {/* Overlay subtitle */}
+            {/* Subtitles */}
             {showSubtitle && (
-              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-2/3 text-center">
-                <p className="text-xl font-medium text-white">{isAiActive ? subtitle.toUpperCase() : "..."}</p>
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-11/12 text-center pointer-events-none z-10">
+                <p className="text-base sm:text-lg md:text-xl font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] tracking-wide">
+                  {isAiActive ? subtitle.toUpperCase() : "..."}
+                </p>
               </div>
             )}
 
-            {/* Precision confidence indicator */}
+            {/* Confidence */}
             {showConfidence && isAiActive && (
-              <div className="absolute top-6 right-6 bg-black/60 backdrop-blur-md border border-cyan-500/30 px-4 py-2 rounded-2xl flex flex-col items-end animate-in fade-in zoom-in duration-300">
-                <span className="text-[10px] font-bold text-cyan-500 uppercase tracking-tighter">AI Confidence</span>
-                <span className="text-2xl font-mono font-bold text-white">{confidence}%</span>
+              <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-cyan-500/30 px-2 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in zoom-in duration-300 pointer-events-none z-10">
+                <span className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider">Conf:</span>
+                <span className="text-sm font-mono font-bold text-white">{confidence}%</span>
               </div>
             )}
           </div>
@@ -261,8 +246,7 @@ function App() {
 
         {/* Settings Panel */}
         {showSettings && (
-          <aside className="w-80 bg-zinc-900 border-l border-white/10 p-6">
-            {/* Settings content */}
+          <aside className="w-80 h-full overflow-y-auto bg-zinc-900 border-l border-white/10 p-6 animate-in slide-in-from-right duration-200">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-cyan-400">Settings</h2>
               <button onClick={() => setShowSettings(false)} className="text-zinc-500 hover:text-white">✕</button>
@@ -271,7 +255,6 @@ function App() {
             <div className="space-y-4">
               <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Voice Settings</label>
 
-              {/* Switch: IA Voice */}
               <div className="flex items-center justify-between bg-zinc-800/30 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-colors mb-2">
                 <div className="flex flex-col">
                   <span className="text-sm font-medium">IA Voice</span>
@@ -287,7 +270,6 @@ function App() {
 
               <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mt-2">Voice Type</label>
               <div className="flex flex-col gap-3">
-                {/* Male voice option */}
                 <button
                   onClick={() => setSelectedVoice('male')}
                   className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between ${selectedVoice === 'male'
@@ -298,7 +280,6 @@ function App() {
                   <span className="font-medium">Male</span>
                 </button>
 
-                {/* Female voice option */}
                 <button
                   onClick={() => setSelectedVoice('female')}
                   className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between ${selectedVoice === 'female'
@@ -310,11 +291,9 @@ function App() {
                 </button>
               </div>
 
-              {/* IA Analysis */}
               <div className="space-y-4 pt-4">
                 <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">IA analysis</label>
 
-                {/* Switch: Hand Landmarks Mediapipe*/}
                 <div className="flex items-center justify-between bg-zinc-800/30 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium">IA hand points</span>
@@ -328,7 +307,6 @@ function App() {
                   </button>
                 </div>
 
-                {/* Switch: IA prediction confidence */}
                 <div className="flex items-center justify-between bg-zinc-800/30 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium">Confidence</span>
@@ -342,7 +320,6 @@ function App() {
                   </button>
                 </div>
 
-                {/* Switch: Subtitles*/}
                 <div className="flex items-center justify-between bg-zinc-800/30 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium">Subtitles</span>
@@ -357,7 +334,8 @@ function App() {
                 </div>
               </div>
             </div>
-          </aside>)}
+          </aside>
+        )}
       </div>
 
       {/* Accumulated sentence and buttons */}
@@ -381,25 +359,20 @@ function App() {
         </div>
       )}
 
-
       {/* Bottom Control Bar */}
-      <footer className="p-2 pb-12 bg-black flex justify-center gap-4">
-
-        {/* Microphone button */}
+      <footer className="p-4 bg-zinc-950 border-t border-white/5 flex justify-center gap-4">
         <button onClick={() => setIsMuted(!isMuted)}
           className={`px-6 py-3 rounded-2xl transition-all active:scale-95 ${isMuted ? 'bg-red-600 hover:bg-red-500' : 'bg-zinc-800 hover:bg-zinc-700'}`}
         >
           {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
         </button>
 
-        {/* Camera video button*/}
         <button onClick={() => setIsCameraOff(!isCameraOff)}
           className={`px-6 py-3 rounded-2xl transition-all active:scale-95 ${isCameraOff ? 'bg-red-600 hover:bg-red-500' : 'bg-zinc-800 hover:bg-zinc-700'}`}
         >
           {isCameraOff ? <VideoOff size={24} /> : <Video size={24} />}
         </button>
 
-        {/* IA mode button*/}
         <button
           onClick={() => setIsAiActive(!isAiActive)}
           className={`px-8 py-3 rounded-2xl font-bold shadow-lg transition-all active:scale-95 ${isAiActive
@@ -411,7 +384,6 @@ function App() {
         </button>
       </footer>
     </div>
-
   );
 }
 

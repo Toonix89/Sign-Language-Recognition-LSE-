@@ -1,10 +1,8 @@
-import asyncio
+import threading
 import os
 import sys
 from dotenv import load_dotenv
 import google.generativeai as genai
-
-# Cuando detecta palabra se crashea
 
 # Configuración de codificación para evitar problemas en Windows
 if sys.stdout.encoding.lower() != "utf-8":
@@ -42,27 +40,30 @@ _gemini_model = genai.GenerativeModel(
 
 
 # =====================================================================
-# VARIABLES GLOBALES (Sustituyen a la clase/objeto)
+# VARIABLES GLOBALES Y CERROJOS (Seguras para hilos)
 # =====================================================================
-buffer = []                # Lista donde se guardan las palabras
-last_word = None           # Guarda la última palabra para evitar repetidas
-timer_task = None          # Tarea que controla el tiempo en segundo plano
-TIMEOUT_SECONDS = 1.5      # Segundos de silencio para traducir
+buffer = []                     # Lista donde se guardan las palabras
+last_word = None                # Guarda la última palabra para evitar repetidas
+timer_thread = None             # Objeto threading.Timer que controla el tiempo en segundo plano
+TIMEOUT_SECONDS = 1.5           # Segundos de silencio para traducir
+buffer_lock = threading.Lock()  # Candado de seguridad para evitar que la cámara y el temporizador choquen
+callback_on_translation = None  # Callback para notificar al frontend vía Socket.IO (enviar_traduccion_a_frontend de server.py)
 
 
 # =====================================================================
 # FUNCIONES DEL SISTEMA
 # =====================================================================
 
-async def translate_glosses(glosses):
-    """Envía las glosas a Gemini y devuelve la frase traducida"""
+def translate_glosses(glosses):
+    """Envía las glosas a Gemini de forma síncrona (corre en hilo secundario)"""
     if not glosses:
         return ""
 
     prompt = f"Glosas a traducir: {', '.join(glosses)}"
 
     try:
-        response = await _gemini_model.generate_content_async(prompt)
+        # Usamos generate_content (SÍNCRONO). No bloquea la cámara porque corre en otro hilo
+        response = _gemini_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
         print(f"[Error LLM]: {e}")
@@ -70,68 +71,61 @@ async def translate_glosses(glosses):
 
 
 def add_word(word):
-    """Añade una palabra al búfer global evitando duplicados rápidos"""
+    """Añade una palabra al búfer protegiendo los datos con el cerrojo"""
     global last_word, buffer
     
     word = word.upper().strip()
 
-    # Si es igual a la última palabra, no hacemos nada y salimos de la función
-    if word == last_word:
-        return
+    # Ponemos el candado mientras tocamos el buffer y reactivamos el tiempo
+    with buffer_lock:
+        if word == last_word:
+            return
 
-    last_word = word
-    buffer.append(word)
-
-    # Cada vez que entra una palabra nueva, reiniciamos el temporizador
-    _restart_timer()
+        last_word = word
+        buffer.append(word)
+        _restart_timer()
 
 
-async def trigger_translation():
-    """Vacía el búfer y pide la traducción"""
-    global buffer
+def trigger_translation():
+    """Vacía el búfer de forma segura y lanza la petición a Gemini"""
+    global buffer, callback_on_translation
     
-    if not buffer:
-        return
+    # Entramos un momento a obtener los datos del buffer y limpiarlo de forma segura
+    with buffer_lock:
+        if not buffer:
+            return
+        glosses_to_translate = buffer.copy()
+        _clear_buffer()
 
-    # Copiamos las palabras acumuladas y limpiamos el almacén
-    glosses_to_translate = buffer.copy()
-    _clear_buffer()
-
+    # El resto de la función corre FUERA del candado para no ralentizar el sistema
     print(f"\n[Traduciendo] Enviando a Gemini: {glosses_to_translate}")
-    
-    # Llamamos a la IA y esperamos la respuesta
-    frase_final = await translate_glosses(glosses_to_translate)
-    
-    # Aquí puedes hacer lo que quieras con la frase (imprimirla, reproducir voz, etc.)
+    frase_final = translate_glosses(glosses_to_translate)
     print(f"[Resultado]: {frase_final}\n")
+
+    # Invocamos el callback para notificar al frontend vía Socket.IO
+    if callback_on_translation is not None:
+        try:
+            callback_on_translation(frase_final)
+        except Exception as e:
+            print(f"[Error Callback]: {e}")
 
 
 def _restart_timer():
-    """Cancela el temporizador anterior y arranca uno nuevo"""
-    global timer_task
+    """Cancela el temporizador de hilos anterior y arranca uno nuevo (Debe llamarse bajo lock)"""
+    global timer_thread
     
-    # Si ya había un temporizador contando, lo paramos
-    if timer_task and not timer_task.done():
-        timer_task.cancel()
+    # Si el hilo del temporizador está vivo esperando el segundo, lo cancelamos
+    if timer_thread is not None:
+        timer_thread.cancel()
 
-    # Arrancamos una cuenta atrás nueva en segundo plano
-    timer_task = asyncio.create_task(_timeout_handler())
-
-
-async def _timeout_handler():
-    """Espera el tiempo de silencio y si nadie lo cancela, traduce"""
-    global TIMEOUT_SECONDS
-    try:
-        await asyncio.sleep(TIMEOUT_SECONDS)
-        await trigger_translation()
-    except asyncio.CancelledError:
-        # Si saltó esta excepción es porque llegó otra palabra y cancelamos el tiempo
-        pass
+    # Creamos un temporizador que ejecutará 'trigger_translation' tras 1.5 segundos
+    timer_thread = threading.Timer(TIMEOUT_SECONDS, trigger_translation)
+    timer_thread.start()
 
 
 def _clear_buffer():
-    """Limpia las variables para la siguiente frase"""
-    global buffer, last_word, timer_task
+    """Limpia las variables (Se ejecuta siempre dentro de un bloque con candado)"""
+    global buffer, last_word, timer_thread
     buffer.clear()
     last_word = None
-    timer_task = None
+    timer_thread = None
