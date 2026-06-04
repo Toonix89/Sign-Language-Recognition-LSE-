@@ -3,25 +3,27 @@ import { Mic, MicOff, Video, VideoOff, Settings, Hand } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 function App() {
-  const videoRef = useRef(null);                             // Reference to the video element
-  const [showSettings, setShowSettings] = useState(false);    // State of settings panel
-  const [isMuted, setIsMuted] = useState(false);              // State of microphone 
-  const [isCameraOff, setIsCameraOff] = useState(false);      // State of camera 
-  const [isAiActive, setIsAiActive] = useState(false);        // State of AI 
-  const [isAiVoiceActive, setIsAiVoiceActive] = useState(false); // State of AI Voice
-  const [selectedVoice, setSelectedVoice] = useState('male'); // State of selected voice
-  const [showMesh, setShowMesh] = useState(true);             // Mediapipe points
-  const [showConfidence, setShowConfidence] = useState(true); // % Confidence precision
-  const [showSubtitle, setShowSubtitle] = useState(true);     // Subtitles
-  const [confidence, setConfidence] = useState(0);           // Precision value
-  const [subtitle, setSubtitle] = useState("Esperando IA..."); // Subtitle value
-  const [landmarks, setLandmarks] = useState([]);              // Hand landmarks
-  const [sentence, setSentence] = useState('');               // Sentence value
+  const videoRef = useRef(null);                             // Referencia al elemento de vídeo
+  const [showSettings, setShowSettings] = useState(false);    // Panel de configuración
+  const [isMuted, setIsMuted] = useState(false);              // Estado del micrófono 
+  const [isCameraOff, setIsCameraOff] = useState(false);      // Estado de la cámara 
+  const [isAiActive, setIsAiActive] = useState(false);        // Estado de la IA de signos
+  const [isAiVoiceActive, setIsAiVoiceActive] = useState(false); // Estado de la voz automática
+  const [selectedVoice, setSelectedVoice] = useState('male'); // Género de la voz elegida
+  const [showMesh, setShowMesh] = useState(true);             // Visualizar malla de MediaPipe
+  const [showConfidence, setShowConfidence] = useState(true); // Mostrar % de precisión
+  const [showSubtitle, setShowSubtitle] = useState(true);     // Mostrar subtítulos en pantalla
+  const [confidence, setConfidence] = useState(0);           // Valor de precisión recibido
+  const [subtitle, setSubtitle] = useState("Esperando IA..."); // Glosa individual detectada
+  const [landmarks, setLandmarks] = useState([]);              // Puntos clave de las manos
+  const [sentence, setSentence] = useState('');               // Frase final traducida acumulada
+  const [wordBuffer, setWordBuffer] = useState([]);           // Búfer de palabras detectadas
+  const [isTranslating, setIsTranslating] = useState(false);  // Estado de traducción
 
-  const canvasRef = useRef(null);                             // Hidden canvas for extracting frames
-  const overlayRef = useRef(null);                            // Canvas for drawing mesh
-  const socketRef = useRef(null);                             // Socket reference
-  const isProcessingRef = useRef(false);                      // Prevent overload
+  const canvasRef = useRef(null);                             // Canvas oculto para extraer fotogramas
+  const overlayRef = useRef(null);                            // Canvas visible para dibujar los puntos
+  const socketRef = useRef(null);                             // Instancia de Socket.IO
+  const isProcessingRef = useRef(false);                      // Flag de control de flujo (Throttling)
 
   const isAiVoiceActiveRef = useRef(isAiVoiceActive);
   const selectedVoiceRef = useRef(selectedVoice);
@@ -34,6 +36,7 @@ function App() {
     selectedVoiceRef.current = selectedVoice;
   }, [selectedVoice]);
 
+  // Inicializar webcam
   useEffect(() => {
     const startVideo = async () => {
       try {
@@ -42,14 +45,44 @@ function App() {
           videoRef.current.srcObject = stream;
         }
       } catch (error) {
-        console.error('Error accessing webcam:', error);
+        console.error('Error al acceder a la cámara web:', error);
       }
     };
 
     startVideo();
   }, []);
 
-  // Socket.IO Connection
+  // Google text to speech
+  const synthesizeAndPlaySpeech = async (textToSpeak, voiceGender) => {
+    if (!textToSpeak.trim()) return;
+
+    const voiceName = voiceGender === 'female' ? 'es-ES-Neural2-A' : 'es-ES-Neural2-B';
+
+    try {
+      const response = await fetch(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaSyBeaMCV7iPxCScoTYAw7jVrtE9cu3s8XxA`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: { text: textToSpeak },
+            voice: { languageCode: 'es-ES', name: voiceName },
+            audioConfig: { audioEncoding: 'MP3' }
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.audioContent) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
+        audio.play();
+      }
+    } catch (err) {
+      console.error("Error en el servicio de síntesis Google TTS:", err);
+    }
+  };
+
+  // Socket.io
   useEffect(() => {
     socketRef.current = io('http://localhost:5000');
 
@@ -60,35 +93,15 @@ function App() {
       isProcessingRef.current = false;
     });
 
+    socketRef.current.on('word_added', (data) => {
+      setWordBuffer(data.buffer);
+    });
+
     socketRef.current.on('translation_result', (data) => {
       setSentence(data.sentence);
-
-      if (isAiVoiceActiveRef.current) {
-        const voiceName = selectedVoiceRef.current === 'female'
-          ? 'es-ES-Neural2-A'
-          : 'es-ES-Neural2-B';
-
-        fetch(
-          `https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaSyBeaMCV7iPxCScoTYAw7jVrtE9cu3s8XxA`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              input: { text: data.sentence },
-              voice: { languageCode: 'es-ES', name: voiceName },
-              audioConfig: { audioEncoding: 'MP3' }
-            })
-          }
-        )
-          .then(res => res.json())
-          .then(resData => {
-            if (resData.audioContent) {
-              const audio = new Audio(`data:audio/mp3;base64,${resData.audioContent}`);
-              audio.play();
-            }
-          })
-          .catch(err => console.error("Error autoplacing TTS:", err));
-      }
+      setWordBuffer([]);
+      setIsTranslating(false);
+      synthesizeAndPlaySpeech(data.sentence, selectedVoiceRef.current);
     });
 
     return () => {
@@ -96,7 +109,14 @@ function App() {
     };
   }, []);
 
-  // Frame sending loop
+  const speakSentence = () => {
+    if (socketRef.current) {
+      console.log("Solicitando traducción manual al servidor...");
+      socketRef.current.emit('trigger_translation');
+    }
+  };
+
+  // Streaming de fotogramas
   useEffect(() => {
     let interval;
     if (isAiActive && !isCameraOff) {
@@ -134,7 +154,7 @@ function App() {
     return () => clearInterval(interval);
   }, [isAiActive, isCameraOff]);
 
-  // Mesh drawing loop
+  // Overlay de puntos clave
   useEffect(() => {
     if (!overlayRef.current || !videoRef.current) return;
     const canvas = overlayRef.current;
@@ -148,6 +168,7 @@ function App() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Dibuja los puntos sobre la imagen reflejada de la webcam
     if (showMesh && landmarks.length > 0) {
       landmarks.forEach(hand => {
         ctx.fillStyle = '#06b6d4';
@@ -160,31 +181,7 @@ function App() {
     }
   }, [landmarks, showMesh]);
 
-  const speakSentence = async () => {
-    if (!sentence.trim()) return;
-
-    const voiceName = selectedVoice === 'female'
-      ? 'es-ES-Neural2-A'
-      : 'es-ES-Neural2-B';
-
-    const response = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaSyBeaMCV7iPxCScoTYAw7jVrtE9cu3s8XxA`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: { text: sentence },
-          voice: { languageCode: 'es-ES', name: voiceName },
-          audioConfig: { audioEncoding: 'MP3' }
-        })
-      }
-    );
-
-    const data = await response.json();
-    const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
-    audio.play();
-  };
-
+  // Interfaz de ususario jsx
   return (
     <div className="h-screen bg-zinc-950 text-white flex flex-col font-sans overflow-hidden">
       {/* Header */}
@@ -200,11 +197,11 @@ function App() {
         </div>
       </header>
 
-      {/* Main Video Area */}
+      {/* Área Principal de Vídeo */}
       <div className="flex-1 min-h-0 p-4 flex bg-black relative justify-center items-center">
         <main className="flex-1 h-full min-h-0 flex items-center justify-center relative">
 
-          {/* Video */}
+          {/* Contenedor del Vídeo Feed */}
           <div className={`relative aspect-video max-w-6xl max-h-full w-auto h-auto bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 border-2 ${isAiActive
             ? 'border-cyan-500 shadow-[0_0_30px_rgba(6,182,212,0.3)]'
             : 'border-white/5'
@@ -215,7 +212,7 @@ function App() {
               autoPlay
               playsInline
               className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : 'block'}`}
-              style={{ transform: 'scaleX(-1)' }}
+              style={{ transform: 'scaleX(-1)' }} // Efecto espejo para comodidad del usuario
             />
 
             <canvas ref={canvasRef} className="hidden" />
@@ -225,7 +222,7 @@ function App() {
               className={`absolute top-0 left-0 w-full h-full object-cover pointer-events-none ${isCameraOff ? 'hidden' : 'block'}`}
             />
 
-            {/* Subtitles */}
+            {/* Subtítulos integrados */}
             {showSubtitle && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-11/12 text-center pointer-events-none z-10">
                 <p className="text-base sm:text-lg md:text-xl font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] tracking-wide">
@@ -234,7 +231,7 @@ function App() {
               </div>
             )}
 
-            {/* Confidence */}
+            {/* Marcador de Confianza de Predicción */}
             {showConfidence && isAiActive && (
               <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-cyan-500/30 px-2 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in zoom-in duration-300 pointer-events-none z-10">
                 <span className="text-[9px] font-bold text-cyan-400 uppercase tracking-wider">Conf:</span>
@@ -244,7 +241,7 @@ function App() {
           </div>
         </main>
 
-        {/* Settings Panel */}
+        {/* Panel Lateral de Ajustes (Settings) */}
         {showSettings && (
           <aside className="w-80 h-full overflow-y-auto bg-zinc-900 border-l border-white/10 p-6 animate-in slide-in-from-right duration-200">
             <div className="flex justify-between items-center mb-6">
@@ -338,20 +335,34 @@ function App() {
         )}
       </div>
 
-      {/* Accumulated sentence and buttons */}
+      {/* Panel Inferior: Muestra de la Frase Acumulada y Acciones */}
       {isAiActive && (
         <div className="px-6 py-3 bg-zinc-900 border-t border-white/10 flex items-center gap-4">
-          <p className="flex-1 text-white text-sm">
-            {sentence || 'Empieza a signar...'}
-          </p>
+          <div className="flex-1 text-sm min-w-0">
+            {isTranslating ? (
+              <p className="text-cyan-400 animate-pulse">Traduciendo glosas...</p>
+            ) : sentence ? (
+              <p className="text-white">{sentence}</p>
+            ) : wordBuffer.length > 0 ? (
+              <p className="text-zinc-300">
+                {wordBuffer.map((w, i) => (
+                  <span key={i} className="inline-block bg-zinc-700 text-cyan-300 rounded-md px-2 py-0.5 mr-1 mb-1 font-mono text-xs">
+                    {w}
+                  </span>
+                ))}
+              </p>
+            ) : (
+              <p className="text-zinc-500 italic">Empieza a signar...</p>
+            )}
+          </div>
           <button
-            onClick={() => setSentence('')}
+            onClick={() => { setSentence(''); setWordBuffer([]); }}
             className="px-4 py-2 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-sm"
           >
             Delete
           </button>
           <button
-            onClick={speakSentence}
+            onClick={() => { setIsTranslating(true); speakSentence(); }}
             className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-sm font-bold"
           >
             Read sentence
@@ -359,7 +370,7 @@ function App() {
         </div>
       )}
 
-      {/* Bottom Control Bar */}
+      {/* Barra de Controles de Hardware (Footer) */}
       <footer className="p-4 bg-zinc-950 border-t border-white/5 flex justify-center gap-4">
         <button onClick={() => setIsMuted(!isMuted)}
           className={`px-6 py-3 rounded-2xl transition-all active:scale-95 ${isMuted ? 'bg-red-600 hover:bg-red-500' : 'bg-zinc-800 hover:bg-zinc-700'}`}
@@ -376,7 +387,7 @@ function App() {
         <button
           onClick={() => setIsAiActive(!isAiActive)}
           className={`px-8 py-3 rounded-2xl font-bold shadow-lg transition-all active:scale-95 ${isAiActive
-            ? 'bg-cyan-500 text-black shadow-cyan-500/40'
+            ? 'bg-cyan-50 text-black shadow-cyan-500/40'
             : 'bg-cyan-600 text-white hover:bg-cyan-500 shadow-cyan-500/20'
             }`}
         >

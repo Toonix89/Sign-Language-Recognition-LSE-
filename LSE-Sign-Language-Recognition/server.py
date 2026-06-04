@@ -7,17 +7,8 @@ from flask_socketio import SocketIO, emit
 import mediapipe as mp
 from tensorflow.keras.models import load_model
 
-# Importamos el gestor de traducción del buffer de señas
+# Importamos el gestor de traducción simplificado
 import sign_buffer_manager
-
-# Callback que se ejecuta cuando el temporizador de silencio expira y Gemini traduce las glosas
-def enviar_traduccion_a_frontend(frase_traducida):
-    print(f"[Socket.IO] Enviando traducción final: {frase_traducida}")
-    socketio.emit('translation_result', {'sentence': frase_traducida})
-
-# Conectamos nuestro buffer con la función emisora de Socket.IO
-sign_buffer_manager.callback_on_translation = enviar_traduccion_a_frontend
-
 
 # Flask and Socket.IO Configuration 
 app = Flask(__name__)
@@ -101,7 +92,7 @@ def handle_disconnect():
     sid = request.sid
     print(f"Client disconnected: {sid}")
     if sid in client_data:
-        client_data[sid]['hands'].close()  # Free MediaPipe resources (si lo eliminase sin antes liberar(close()), se quedaría en la memoria consumiendo RAM)
+        client_data[sid]['hands'].close()  # Free MediaPipe resources
         del client_data[sid]
 
 @socketio.on('video_frame')
@@ -134,30 +125,47 @@ def handle_video_frame(data):
         confidence = float(res[max_idx])
         word = list_actions[max_idx]
 
+        # Filtro de reposo estricto con los paréntesis de tu dataset entrenado
         if word == "(Reposo)" or confidence < threshold:
-            # Rest pose or low confidence: reset streak, stay silent
             client_data[sid]['consecutive_count'] = 0
         else:
             if word == client_data[sid]['last_prediction']:
                 client_data[sid]['consecutive_count'] += 1
             else:
-                # Different word: restart streak
                 client_data[sid]['consecutive_count'] = 1
                 client_data[sid]['last_prediction'] = word
 
             if client_data[sid]['consecutive_count'] >= MIN_CONSECUTIVE:
-                # Sign confirmed — emit it and reset so the next sign starts fresh
                 prediction_result['word'] = word
                 prediction_result['confidence'] = int(confidence * 100)
                 
-                # Enviamos la palabra detectada al gestor de traducción
+                # Se guarda la palabra de forma segura en la lista interna
                 sign_buffer_manager.add_word(word)
+                emit('word_added', {'buffer': sign_buffer_manager.buffer})
+                
                 
                 client_data[sid]['sequence'] = []
                 client_data[sid]['consecutive_count'] = 0
 
     emit('prediction_result', prediction_result)
 
+# =====================================================================
+# NUEVO EVENTO: DISPARADOR MANUAL DE TRADUCCIÓN LLM
+# =====================================================================
+@socketio.on('trigger_translation')
+def handle_trigger_translation():
+    sid = request.sid
+    print(f"[Socket.IO] El cliente {sid} ha solicitado la traducción de la frase.")
+    
+    # El mánager procesa lo acumulado, vacía la lista y llama a Gemini 2.0 Flash
+    frase_final = sign_buffer_manager.translate_current_buffer()
+    
+    if frase_final:
+        print(f"[Socket.IO] Enviando frase estructurada a la interfaz web: '{frase_final}'")
+        # Se le inyecta la frase en el canal global para actualizar la UI de React
+        emit('translation_result', {'sentence': frase_final})
+
 if __name__ == '__main__':
     print("Starting Socket.IO server on port 5000...")
+    # Ahora que no hay timers en background, puedes usar debug=True si lo deseas para desarrollo rápido
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)

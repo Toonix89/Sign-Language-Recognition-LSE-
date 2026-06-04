@@ -1,131 +1,82 @@
-import threading
-import os
-import sys
-from dotenv import load_dotenv
-import google.generativeai as genai
+import requests
 
-# Configuración de codificación para evitar problemas en Windows
-if sys.stdout.encoding.lower() != "utf-8":
-    sys.stdout.reconfigure(encoding="utf-8")
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "llama3.2"
 
-# Carga de la API Key de Gemini desde el archivo .env
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-dotenv_path = os.path.join(parent_dir, '.env')
-if os.path.exists(dotenv_path):
-    load_dotenv(dotenv_path)
-else:
-    load_dotenv()
+_SYSTEM_PROMPT = """Eres un traductor especializado de Lengua de Signos Española (LSE) a español escrito.
 
-_api_key = os.environ.get("GEMINI_API_KEY", "")
-if not _api_key:
-    raise EnvironmentError("No se encontró la clave GEMINI_API_KEY en el archivo .env")
+TAREA: Recibes una lista de glosas en mayúsculas (palabras sueltas en orden LSE) y debes convertirlas en UNA frase en español natural y gramaticalmente correcta.
 
-genai.configure(api_key=_api_key)
+REGLAS OBLIGATORIAS:
+1. REORDENA las palabras al orden natural del español (sujeto-verbo-objeto).
+2. AÑADE los verbos auxiliares que falten: "YO BIEN" → "Yo estoy bien.", "YO HAMBRE" → "Yo tengo hambre."
+3. AÑADE artículos, preposiciones y nexos necesarios.
+4. Si las glosas forman una pregunta (hay CUAL, DONDE, CUANDO, COMO, QUIEN, CUANTO), añade ¿ y ?.
+5. Devuelve ÚNICAMENTE la frase final. Sin explicaciones, sin notas, sin comillas.
 
-# Prompt para el comportamiento de Gemini
-_SYSTEM_PROMPT = (
-    "Eres el motor de traducción (SLT) de un sistema de Lengua de Signos Española (LSE).\n"
-    "Tu tarea es recibir una lista de glosas en mayúsculas y transformarlas en una frase "
-    "en español que sea natural, fluida y gramaticalmente correcta.\n\n"
-    "Reglas estrictas:\n"
-    "1. Añade los artículos, preposiciones y verbos auxiliares (ser/estar) que falten.\n"
-    "2. Conjuga correctamente los verbos según el contexto de la frase.\n"
-    "3. Devuelve ÚNICAMENTE la frase final traducida. No incluyas explicaciones ni notas."
-)
+EJEMPLOS:
+- TU, NOMBRE, CUAL → ¿Cuál es tu nombre?
+- YO, BIEN → Yo estoy bien.
+- YO, HAMBRE → Yo tengo hambre.
+- TU, DONDE, VIVIR → ¿Dónde vives?
+- ADIOS, GRACIAS → Adiós, muchas gracias.
+- YO, LLAMAR, PABLO → Me llamo Pablo.
+- TU, CUANTOS, AÑOS → ¿Cuántos años tienes?"""
 
-_gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash",
-    system_instruction=_SYSTEM_PROMPT,
-)
+# Buffer de palabras detectadas
+buffer = []
+last_word = None
 
 
-# =====================================================================
-# VARIABLES GLOBALES Y CERROJOS (Seguras para hilos)
-# =====================================================================
-buffer = []                     # Lista donde se guardan las palabras
-last_word = None                # Guarda la última palabra para evitar repetidas
-timer_thread = None             # Objeto threading.Timer que controla el tiempo en segundo plano
-TIMEOUT_SECONDS = 1.5           # Segundos de silencio para traducir
-buffer_lock = threading.Lock()  # Candado de seguridad para evitar que la cámara y el temporizador choquen
-callback_on_translation = None  # Callback para notificar al frontend vía Socket.IO (enviar_traduccion_a_frontend de server.py)
-
-
-# =====================================================================
-# FUNCIONES DEL SISTEMA
-# =====================================================================
-
-def translate_glosses(glosses):
-    """Envía las glosas a Gemini de forma síncrona (corre en hilo secundario)"""
-    if not glosses:
-        return ""
-
-    prompt = f"Glosas a traducir: {', '.join(glosses)}"
-
-    try:
-        # Usamos generate_content (SÍNCRONO). No bloquea la cámara porque corre en otro hilo
-        response = _gemini_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"[Error LLM]: {e}")
-        return f"{' '.join(glosses).lower().capitalize()}."
-
-
-def add_word(word):
-    """Añade una palabra al búfer protegiendo los datos con el cerrojo"""
+def add_word(word: str):
+    """Guarda la palabra detectada en el buffer evitando duplicados inmediatos."""
     global last_word, buffer
-    
     word = word.upper().strip()
 
-    # Ponemos el candado mientras tocamos el buffer y reactivamos el tiempo
-    with buffer_lock:
-        if word == last_word:
-            return
-
-        last_word = word
+    if word != last_word:
         buffer.append(word)
-        _restart_timer()
+        last_word = word
+        print(f"[Buffer] Palabra guardada: {word} | Buffer actual: {buffer}")
 
 
-def trigger_translation():
-    """Vacía el búfer de forma segura y lanza la petición a Gemini"""
-    global buffer, callback_on_translation
-    
-    # Entramos un momento a obtener los datos del buffer y limpiarlo de forma segura
-    with buffer_lock:
-        if not buffer:
-            return
-        glosses_to_translate = buffer.copy()
-        _clear_buffer()
+def translate_current_buffer() -> str:
+    """Traduce todo lo acumulado, limpia el buffer y devuelve la frase."""
+    global buffer, last_word
 
-    # El resto de la función corre FUERA del candado para no ralentizar el sistema
-    print(f"\n[Traduciendo] Enviando a Gemini: {glosses_to_translate}")
-    frase_final = translate_glosses(glosses_to_translate)
-    print(f"[Resultado]: {frase_final}\n")
+    if not buffer:
+        return ""
 
-    # Invocamos el callback para notificar al frontend vía Socket.IO
-    if callback_on_translation is not None:
-        try:
-            callback_on_translation(frase_final)
-        except Exception as e:
-            print(f"[Error Callback]: {e}")
-
-
-def _restart_timer():
-    """Cancela el temporizador de hilos anterior y arranca uno nuevo (Debe llamarse bajo lock)"""
-    global timer_thread
-    
-    # Si el hilo del temporizador está vivo esperando el segundo, lo cancelamos
-    if timer_thread is not None:
-        timer_thread.cancel()
-
-    # Creamos un temporizador que ejecutará 'trigger_translation' tras 1.5 segundos
-    timer_thread = threading.Timer(TIMEOUT_SECONDS, trigger_translation)
-    timer_thread.start()
-
-
-def _clear_buffer():
-    """Limpia las variables (Se ejecuta siempre dentro de un bloque con candado)"""
-    global buffer, last_word, timer_thread
+    glosses_to_translate = buffer.copy()
     buffer.clear()
     last_word = None
-    timer_thread = None
+
+    gloss_str = ", ".join(glosses_to_translate)
+    print(f"[Ollama] Traduciendo: {glosses_to_translate}")
+
+    prompt = f"Glosas LSE a traducir: {gloss_str}"
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "system": _SYSTEM_PROMPT,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,
+                    "num_predict": 80,
+                }
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        translated = response.json()["response"].strip()
+        print(f"[Ollama] Traducción: '{translated}'")
+        return translated
+
+    except Exception as e:
+        print(f"[Error Ollama]: {e}")
+        fallback = f"{' '.join(glosses_to_translate).lower().capitalize()}."
+        print(f"[Ollama] Fallback: '{fallback}'")
+        return fallback
