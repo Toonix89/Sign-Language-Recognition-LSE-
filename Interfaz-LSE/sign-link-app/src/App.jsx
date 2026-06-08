@@ -60,7 +60,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=AIzaSyBeaMCV7iPxCScoTYAw7jVrtE9cu3s8XxA`,
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.REACT_APP_GOOGLE_TTS_KEY}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
