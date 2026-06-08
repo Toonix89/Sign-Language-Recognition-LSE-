@@ -6,12 +6,14 @@ from tensorflow.keras.layers import LSTM, Dense, Bidirectional, Dropout, BatchNo
 from tensorflow.keras.utils import to_categorical  # type: ignore
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
 
 
 DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio"
 MAX_FRAMES = 30 
 NUM_FEATURES = 126 # 21 points * 3 coords * 2 hands
-AUGMENTATION_MULTIPLIER = 2 # For each real file, we will generate "x" extra
+AUGMENTATION_MULTIPLIER = 4 # For each real file, we will generate "x" extra
 
 # 1. Function to pad or truncate sequences
 def pad_or_truncate_sequence(seq, max_frames=30):
@@ -97,21 +99,20 @@ print(f"Datos cargados. X shape: {X.shape}, y shape: {y.shape}")
 print(f"Palabras detectadas ({len(label_map)}): {list(label_map.keys())}")
 
 # Divide into train and validation
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.20, random_state=42)
 
 print("Construyendo el modelo BiLSTM...")
 
 model = Sequential([
-    Bidirectional(LSTM(128, return_sequences=True, activation='tanh'), input_shape=(MAX_FRAMES, NUM_FEATURES)),
-    Dropout(0.3),
-    BatchNormalization(),
+    Bidirectional(LSTM(128, return_sequences=True, activation='tanh'), 
+                  input_shape=(MAX_FRAMES, NUM_FEATURES)),
+    Dropout(0.4),
     
-    Bidirectional(LSTM(256, return_sequences=False, activation='tanh')),
-    Dropout(0.3),
-    BatchNormalization(),
+    Bidirectional(LSTM(128, return_sequences=False, activation='tanh')),
+    Dropout(0.4),
     
-    Dense(128, activation='relu'),
-    Dropout(0.2),
+    Dense(64, activation='relu'),
+    Dropout(0.3),
     
     Dense(len(label_map), activation='softmax')
 ])
@@ -137,3 +138,6 @@ history = model.fit(
 
 model.save(os.path.join(OUTPUT_PATH, 'bilstm_model.h5'))
 print("Modelo guardado como bilstm_model.h5")
+
+np.save(os.path.join(OUTPUT_PATH, 'historial_entrenamiento.npy'), history.history)
+print("Historial de entrenamiento guardado como historial_entrenamiento.npy")
