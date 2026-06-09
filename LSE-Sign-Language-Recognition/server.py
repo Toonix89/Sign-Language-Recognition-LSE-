@@ -165,6 +165,12 @@ def handle_trigger_translation():
         # Se le inyecta la frase en el canal global para actualizar la UI de React
         emit('translation_result', {'sentence': frase_final})
 
+@socketio.on('clear_buffer')
+def handle_clear_buffer():
+    sign_buffer_manager.buffer.clear()
+    sign_buffer_manager.last_word = None
+    print(f"[Socket.IO] Buffer limpiado por el cliente {request.sid}")
+
 if __name__ == '__main__':
     print("Starting Socket.IO server on port 5000...")
     # Ahora que no hay timers en background, puedes usar debug=True si lo deseas para desarrollo rápido

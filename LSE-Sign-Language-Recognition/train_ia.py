@@ -106,13 +106,13 @@ print("Construyendo el modelo BiLSTM...")
 model = Sequential([
     Bidirectional(LSTM(128, return_sequences=True, activation='tanh'), 
                   input_shape=(MAX_FRAMES, NUM_FEATURES)),
-    Dropout(0.4),
-    
-    Bidirectional(LSTM(128, return_sequences=False, activation='tanh')),
-    Dropout(0.4),
-    
-    Dense(64, activation='relu'),
     Dropout(0.3),
+    
+    Bidirectional(LSTM(256, return_sequences=False, activation='tanh')),
+    Dropout(0.3),
+    
+    Dense(128, activation='relu'),
+    Dropout(0.2),
     
     Dense(len(label_map), activation='softmax')
 ])

@@ -60,7 +60,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.REACT_APP_GOOGLE_TTS_KEY}`,
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${import.meta.env.VITE_GOOGLE_TTS_KEY}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -87,7 +87,9 @@ function App() {
     socketRef.current = io('http://localhost:5000');
 
     socketRef.current.on('prediction_result', (data) => {
-      setSubtitle(data.word);
+      if (data.word && data.word !== '...') {
+        setSubtitle(data.word);
+      }
       setConfidence(data.confidence);
       setLandmarks(data.landmarks);
       isProcessingRef.current = false;
@@ -101,6 +103,7 @@ function App() {
       setSentence(data.sentence);
       setWordBuffer([]);
       setIsTranslating(false);
+      setSubtitle(data.sentence);
       synthesizeAndPlaySpeech(data.sentence, selectedVoiceRef.current);
     });
 
@@ -113,6 +116,16 @@ function App() {
     if (socketRef.current) {
       console.log("Solicitando traducción manual al servidor...");
       socketRef.current.emit('trigger_translation');
+    }
+  };
+
+  // Limpiar buffer del servidor al pulsar Delete
+  const handleDelete = () => {
+    setSentence('');
+    setWordBuffer([]);
+    setSubtitle("Esperando IA...");
+    if (socketRef.current) {
+      socketRef.current.emit('clear_buffer');
     }
   };
 
@@ -356,7 +369,7 @@ function App() {
             )}
           </div>
           <button
-            onClick={() => { setSentence(''); setWordBuffer([]); }}
+            onClick={handleDelete}
             className="px-4 py-2 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-sm"
           >
             Delete
