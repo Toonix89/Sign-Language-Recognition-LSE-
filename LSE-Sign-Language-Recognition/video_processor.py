@@ -24,7 +24,7 @@ def process_video(video_path, output_csv):
             for hand_landmarks in results.multi_hand_landmarks:
                 landmarks = []
                 for lm in hand_landmarks.landmark:
-                    landmarks.extend([lm.x, lm.y, lm.z]) # Save X, Y, Z for each of the 21 points
+                    landmarks.extend([lm.x, lm.y, lm.z]) # Guardar X, Y, Z para cada uno de los 21 puntos
                 datalist.append(landmarks)
         
     with open(output_csv, 'w', newline='') as f:

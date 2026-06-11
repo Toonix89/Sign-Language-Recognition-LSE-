@@ -12,10 +12,10 @@ import matplotlib.pyplot as plt
 
 DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio"
 MAX_FRAMES = 30 
-NUM_FEATURES = 126 # 21 points * 3 coords * 2 hands
-AUGMENTATION_MULTIPLIER = 4 # For each real file, we will generate "x" extra
+NUM_FEATURES = 126 # 21 puntos * 3 coords * 2 manos
+AUGMENTATION_MULTIPLIER = 4 # Por cada archivo real, generaremos "x" extras
 
-# 1. Function to pad or truncate sequences
+# 1. Función para rellenar o truncar secuencias
 def pad_or_truncate_sequence(seq, max_frames=30):
     seq_len = len(seq)
     if seq_len >= max_frames:
@@ -24,14 +24,14 @@ def pad_or_truncate_sequence(seq, max_frames=30):
         padding = np.zeros((max_frames - seq_len, NUM_FEATURES))
         return np.vstack((seq, padding))
 
-# 2. Data Augmentation Function
+# 2. Función de aumento de datos
 def augment_sequence(seq):
     augmented = np.copy(seq)
-    # Gaussian Noise
+    # Ruido Gaussiano
     noise = np.random.normal(0, 0.007, augmented.shape)
     augmented += noise
     
-    # Random Shift
+    # Desplazamiento aleatorio
     shift_x = np.random.uniform(-0.03, 0.03)
     shift_y = np.random.uniform(-0.03, 0.03)
     
@@ -44,11 +44,11 @@ print("Escaneando dataset...")
 
 sequences, labels = [], []
 
-# Dynamic folder mapping
+# Mapeo dinámico de carpetas
 label_map = {}
 current_label_id = 0
 
-# Iterate over the word folders in Database_propio
+# Iterar sobre las carpetas de palabras en Database_propio
 for word_folder in os.listdir(DATA_PATH):
     folder_path = os.path.join(DATA_PATH, word_folder)
     if not os.path.isdir(folder_path):
@@ -60,7 +60,7 @@ for word_folder in os.listdir(DATA_PATH):
         
     label_id = label_map[word_folder]
     
-    # Load all .npy files in the folder
+    # Cargar todos los archivos .npy en la carpeta
     npy_files = glob.glob(os.path.join(folder_path, "*.npy"))
     
     for file_path in npy_files:
@@ -73,15 +73,15 @@ for word_folder in os.listdir(DATA_PATH):
         if len(seq) == 0:
             continue
             
-        # Standardize the length
+        # Estandarizar la longitud
         seq = pad_or_truncate_sequence(seq, MAX_FRAMES)
         
         # Original
         sequences.append(seq)
         labels.append(label_id)
         
-        # We avoid infinite augmentation if it is already an augmented file ('aug' in the name)
-        # We only augment the "original" files and the "new" ones you recorded to give it a small boost
+        # Evitamos el aumento infinito si ya es un archivo aumentado ('aug' en el nombre)
+        # Solo aumentamos los archivos "originales" y los "nuevos" que grabaste para darle un pequeño impulso
         if 'aug' not in os.path.basename(file_path):
             for _ in range(AUGMENTATION_MULTIPLIER):
                 aug_seq = augment_sequence(seq)
@@ -91,14 +91,14 @@ for word_folder in os.listdir(DATA_PATH):
 X = np.array(sequences)
 y = to_categorical(labels).astype(int)
 
-# Save label map for use in translate.py
+# Guardar el mapa de etiquetas para usar en translate.py
 OUTPUT_PATH = "C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition"
 np.save(os.path.join(OUTPUT_PATH, "label_map_propio.npy"), label_map)
 
 print(f"Datos cargados. X shape: {X.shape}, y shape: {y.shape}")
 print(f"Palabras detectadas ({len(label_map)}): {list(label_map.keys())}")
 
-# Divide into train and validation
+# Dividir en entrenamiento y validación
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.20, random_state=42)
 
 print("Construyendo el modelo BiLSTM...")
@@ -120,7 +120,7 @@ model = Sequential([
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
 
-# --- TRAINING---
+# --- ENTRENAMIENTO ---
 print("Empezando el entrenamiento...")
 
 callbacks = [

@@ -4,15 +4,15 @@ import numpy as np
 import os
 import time
 
-ACCION_A_GRABAR = "Cual"  # Word to record
+ACCION_A_GRABAR = "Adios"  # Palabra a grabar
 DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio/{ACCION_A_GRABAR}"
 
 if not os.path.exists(DATA_PATH):
     os.makedirs(DATA_PATH)
 
-# Look for the file number to avoid overwriting
+# Buscar el número de archivo para evitar sobrescribir
 existentes = [f for f in os.listdir(DATA_PATH) if f.endswith('.npy')]
-# If you already had files, start from the next one
+# Si ya tenías archivos, comenzar desde el siguiente
 contador = len(existentes) 
 
 mp_hands = mp.solutions.hands
@@ -41,7 +41,7 @@ while cap.isOpened():
         print(f"Grabando muestra {contador}...")
         secuencia_temporal = []
         
-        # Record hands in 30 frames
+        # Grabar manos en 30 fotogramas
         for frame_num in range(30):
             ret, frame = cap.read()
             frame = cv2.flip(frame, 1)
@@ -60,12 +60,12 @@ while cap.isOpened():
             
             secuencia_temporal.append(puntos_frame)
             
-            # Red dot to indicate recording
+            # Punto rojo para indicar grabación
             cv2.circle(frame, (frame.shape[1]-30, 30), 15, (0, 0, 255), -1)
             cv2.imshow('Capturador de TFG', frame)
             cv2.waitKey(1)
 
-        # Save with a unique name
+        # Guardar con un nombre único
         file_name = f"{ACCION_A_GRABAR}_new_{contador}.npy"
         np.save(os.path.join(DATA_PATH, file_name), np.array(secuencia_temporal))
         contador += 1

@@ -2,10 +2,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Video, VideoOff, Settings, Hand } from 'lucide-react';
 import { io } from 'socket.io-client';
 
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+if (recognition) {
+  recognition.continuous = true; // Para que no se pare al revés de la primera pausa
+  recognition.interimResults = true; // Para ver las palabras en pantalla mientras hablas
+  recognition.lang = 'es-ES'; // Idioma configurado en castellano
+}
+
 function App() {
   const videoRef = useRef(null);                             // Referencia al elemento de vídeo
   const [showSettings, setShowSettings] = useState(false);    // Panel de configuración
-  const [isMuted, setIsMuted] = useState(false);              // Estado del micrófono 
+  const [isMuted, setIsMuted] = useState(true);               // Estado del micrófono (Inicia silenciado por seguridad)
   const [isCameraOff, setIsCameraOff] = useState(false);      // Estado de la cámara 
   const [isAiActive, setIsAiActive] = useState(false);        // Estado de la IA de signos
   const [isAiVoiceActive, setIsAiVoiceActive] = useState(false); // Estado de la voz automática
@@ -14,7 +23,7 @@ function App() {
   const [showConfidence, setShowConfidence] = useState(true); // Mostrar % de precisión
   const [showSubtitle, setShowSubtitle] = useState(true);     // Mostrar subtítulos en pantalla
   const [confidence, setConfidence] = useState(0);           // Valor de precisión recibido
-  const [subtitle, setSubtitle] = useState("Esperando IA..."); // Glosa individual detectada
+  const [subtitle, setSubtitle] = useState("...");            // Texto dinámico de los subtítulos
   const [landmarks, setLandmarks] = useState([]);              // Puntos clave de las manos
   const [sentence, setSentence] = useState('');               // Frase final traducida acumulada
   const [wordBuffer, setWordBuffer] = useState([]);           // Búfer de palabras detectadas
@@ -36,16 +45,16 @@ function App() {
     selectedVoiceRef.current = selectedVoice;
   }, [selectedVoice]);
 
-  // Inicializar webcam
+  // Inicializar webcam pidiendo permisos de VÍDEO y AUDIO simultáneamente
   useEffect(() => {
     const startVideo = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch (error) {
-        console.error('Error al acceder a la cámara web:', error);
+        console.error('Error al acceder a los periféricos multimedia:', error);
       }
     };
 
@@ -89,8 +98,11 @@ function App() {
     socketRef.current.on('prediction_result', (data) => {
       if (data.word && data.word !== '...') {
         setSubtitle(data.word);
+
+        const porcentaje = (data.confidence).toFixed(1);
+        setConfidence(porcentaje);
       }
-      setConfidence(data.confidence);
+
       setLandmarks(data.landmarks);
       isProcessingRef.current = false;
     });
@@ -123,7 +135,7 @@ function App() {
   const handleDelete = () => {
     setSentence('');
     setWordBuffer([]);
-    setSubtitle("Esperando IA...");
+    setSubtitle("...");
     if (socketRef.current) {
       socketRef.current.emit('clear_buffer');
     }
@@ -160,12 +172,13 @@ function App() {
         }
       }, 50);
     } else if (!isAiActive) {
-      setSubtitle("IA desactivada");
+      // Si apagamos la IA, limpiamos la pantalla sin pisar el estado si el micro está escuchando
+      setSubtitle(prev => (isMuted ? "..." : prev));
       setLandmarks([]);
       isProcessingRef.current = false;
     }
     return () => clearInterval(interval);
-  }, [isAiActive, isCameraOff]);
+  }, [isAiActive, isCameraOff, isMuted]);
 
   // Overlay de puntos clave
   useEffect(() => {
@@ -184,7 +197,7 @@ function App() {
     // Dibuja los puntos sobre la imagen reflejada de la webcam
     if (showMesh && landmarks.length > 0) {
       landmarks.forEach(hand => {
-        ctx.fillStyle = '#06b6d4';
+        ctx.fillStyle = '#06b6d4'; // Color azul/cian configurado
         hand.landmarks.forEach(lm => {
           ctx.beginPath();
           ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
@@ -194,7 +207,43 @@ function App() {
     }
   }, [landmarks, showMesh]);
 
-  // Interfaz de ususario jsx
+  // Reconocimiento de Voz (Speech-to-Text integrado de forma síncrona)
+  useEffect(() => {
+    if (!recognition) return;
+
+    if (!isMuted) {
+      try {
+        recognition.start();
+      } catch (e) {
+        console.log("El recognition ya estaba activo");
+      }
+    } else {
+      recognition.stop();
+    }
+
+    recognition.onresult = (event) => {
+      const currentResultIndex = event.resultIndex;
+      const transcript = event.results[currentResultIndex][0].transcript;
+      setSubtitle(transcript); // Inyecta la voz directamente en el subtítulo común
+    };
+
+    recognition.onend = () => {
+      if (!isMuted) {
+        try {
+          recognition.start();
+        } catch (e) { }
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error("⚠️ Error en SpeechRecognition:", event.error);
+    };
+
+    return () => {
+      recognition.stop();
+    };
+  }, [isMuted]);
+
   return (
     <div className="h-screen bg-zinc-950 text-white flex flex-col font-sans overflow-hidden">
       {/* Header */}
@@ -224,8 +273,9 @@ function App() {
               ref={videoRef}
               autoPlay
               playsInline
+              muted // CRITICAL: Silencia el retorno del propio PC para evitar acoples de sonido e interferencias
               className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : 'block'}`}
-              style={{ transform: 'scaleX(-1)' }} // Efecto espejo para comodidad del usuario
+              style={{ transform: 'scaleX(-1)' }}
             />
 
             <canvas ref={canvasRef} className="hidden" />
@@ -235,11 +285,11 @@ function App() {
               className={`absolute top-0 left-0 w-full h-full object-cover pointer-events-none ${isCameraOff ? 'hidden' : 'block'}`}
             />
 
-            {/* Subtítulos integrados */}
+            {/* Subtítulos independientes del Modo IA */}
             {showSubtitle && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-11/12 text-center pointer-events-none z-10">
                 <p className="text-base sm:text-lg md:text-xl font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] tracking-wide">
-                  {isAiActive ? subtitle.toUpperCase() : "..."}
+                  {subtitle.toUpperCase()}
                 </p>
               </div>
             )}

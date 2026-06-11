@@ -1,4 +1,4 @@
-# --- Translator LSE - Real Time Sign Language Recognition ---
+# --- Traductor LSE - Reconocimiento de Lengua de Señas en Tiempo Real ---
 
 import os
 import cv2
@@ -7,39 +7,39 @@ import mediapipe as mp
 import numpy as np
 from tensorflow.keras.models import load_model
 
-# MediaPipe drawing and model configuration
+# Configuración del modelo y dibujo de MediaPipe
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 mp_hands = mp.solutions.hands
 
-# Load the BiLSTM model and label map
+# Cargar el modelo BiLSTM y el mapa de etiquetas
 print("Loading model...")
 model = load_model('bilstm_model.h5')
 
 if os.path.exists('label_map_propio.npy'):
     label_map = np.load('label_map_propio.npy', allow_pickle=True).item()
-    # Invert dictionary to id -> word
+    # Invertir el diccionario a id -> palabra
     list_actions = {v: k for k, v in label_map.items()}
     print(f"Words trained: {list(list_actions.values())}")
 else:
     print("ERROR: label_map_propio.npy not found. Please train the model first.")
     exit()
 
-# Sequence and threshold
+# Secuencia y umbral
 sequence = []
 sentence = ""
 confidence = 0
 threshold = 0.7
 MAX_FRAMES = 30
-MIN_CONSECUTIVE = 5   # Predictions in a row required to confirm a sign
-consecutive_count = 0 # Current streak counter
-last_prediction = None  # Last predicted word (for streak tracking)
+MIN_CONSECUTIVE = 5   # Predicciones consecutivas requeridas para confirmar una seña
+consecutive_count = 0 # Contador de racha actual
+last_prediction = None  # Última palabra predicha (para seguimiento de racha)
 
-# Start camera
+# Iniciar cámara
 cap = cv2.VideoCapture(0)
 print("Translator started. Press 'q' to exit.")
 
-# Initialize Hands model
+# Inicializar el modelo de Manos
 with mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7) as hands:
     while cap.isOpened():
         ret, frame = cap.read()
@@ -48,22 +48,22 @@ with mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7) as hands:
         frame = cv2.flip(frame, 1)
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Process with MediaPipe Hands
+        # Procesar con MediaPipe Hands
         results = hands.process(img_rgb)
         
-        # 126 values array (2 hands * 21 points * 3 coordinates)
+        # Array de 126 valores (2 manos * 21 puntos * 3 coordenadas)
         frame_data = np.zeros(126) 
         
-        # --- DRAWING AND EXTRACTION ---
+        # --- DIBUJO Y EXTRACCIÓN ---
         if results.multi_hand_landmarks:
             for i, hand_lms in enumerate(results.multi_hand_landmarks):
-                # Draw landmarks on frame
+                # Dibujar puntos de referencia (landmarks) en el fotograma
                 mp_drawing.draw_landmarks(
                     frame, hand_lms, mp_hands.HAND_CONNECTIONS,
                     mp_drawing_styles.get_default_hand_landmarks_style(),
                     mp_drawing_styles.get_default_hand_connections_style())
 
-                if i > 1: break # Max 2 hands
+                if i > 1: break # Máximo 2 manos
                 
                 label = results.multi_handedness[i].classification[0].label
                 start_idx = 0 if label == 'Left' else 63
@@ -72,46 +72,46 @@ with mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7) as hands:
                     idx = start_idx + (j * 3)
                     frame_data[idx:idx+3] = [lm.x, lm.y, lm.z]
         else:
-            # NO HANDS: Send zeros
+            # SIN MANOS: Enviar ceros
             frame_data = np.zeros(126)
 
-        # Add to sequence
+        # Añadir a la secuencia
         sequence.append(frame_data)
         sequence = sequence[-MAX_FRAMES:]
 
-        # --- PREDICTION ---
+        # --- PREDICCIÓN ---
         if len(sequence) == MAX_FRAMES:
-            # expand_dims to have shape (1, 30, 126)
+            # expand_dims para tener la forma (1, 30, 126)
             res = model.predict(np.expand_dims(sequence, axis=0), verbose=0)[0]
             max_idx = np.argmax(res)
             confidence = res[max_idx]
             word = list_actions[max_idx]
 
             if word == "(Reposo)" or confidence < threshold:
-                # Rest pose or low confidence: reset streak, stay silent
+                # Pose de reposo o baja confianza: reiniciar racha, permanecer en silencio
                 consecutive_count = 0
                 sentence = "..."
             else:
                 if word == last_prediction:
                     consecutive_count += 1
                 else:
-                    # Different word: restart streak
+                    # Palabra diferente: reiniciar racha
                     consecutive_count = 1
                     last_prediction = word
 
                 if consecutive_count >= MIN_CONSECUTIVE:
-                    # Sign confirmed — show it and reset so the next sign starts fresh
+                    # Seña confirmada — mostrarla y reiniciar para que la siguiente comience de cero
                     sentence = word
                     sequence = []
                     consecutive_count = 0
                 else:
                     sentence = "..."
 
-        # --- INTERFACE ---
-        # Top rectangle for text
+        # --- INTERFAZ ---
+        # Rectángulo superior para el texto
         cv2.rectangle(frame, (0,0), (640, 45), (245, 117, 16), -1)
         
-        # Prediction and Percentage text
+        # Texto de predicción y porcentaje
         display_text = f"{sentence.upper()} ({int(confidence*100)}%)"
         cv2.putText(frame, display_text, (10, 32), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)

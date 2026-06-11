@@ -29,7 +29,7 @@ last_word = None
 
 
 def add_word(word: str):
-    """Guarda la palabra detectada en el buffer evitando duplicados inmediatos."""
+    # Guarda la palabra detectada en el buffer evitando duplicados inmediatos
     global last_word, buffer
     word = word.upper().strip()
 
@@ -40,7 +40,7 @@ def add_word(word: str):
 
 
 def translate_current_buffer() -> str:
-    """Traduce todo lo acumulado, limpia el buffer y devuelve la frase."""
+    #Traduce todo lo acumulado, limpia el buffer y devuelve la frase.
     global buffer, last_word
 
     if not buffer:
@@ -80,3 +80,9 @@ def translate_current_buffer() -> str:
         fallback = f"{' '.join(glosses_to_translate).lower().capitalize()}."
         print(f"[Ollama] Fallback: '{fallback}'")
         return fallback
+    
+    data = response.json()
+
+    if 'total_duration' in data:
+        milisegundos = data['total_duration'] / 1_000_000
+        print(f"Ollama ha tardado: {milisegundos:.2f} ms")
