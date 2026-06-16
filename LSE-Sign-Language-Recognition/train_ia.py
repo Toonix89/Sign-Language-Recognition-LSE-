@@ -8,12 +8,12 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
-
-
-DATA_PATH = f"C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio"
+# Rutas y Parámetros
+DATA_PATH = "C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition/Database_propio"
+OUTPUT_PATH = "C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition"
 MAX_FRAMES = 30 
-NUM_FEATURES = 126 # 21 puntos * 3 coords * 2 manos
-AUGMENTATION_MULTIPLIER = 4 # Por cada archivo real, generaremos "x" extras
+NUM_FEATURES = 126  # 21 puntos * 3 coords * 2 manos
+AUGMENTATION_MULTIPLIER = 4  # Cantidad de clones aumentados por cada secuencia real
 
 # 1. Función para rellenar o truncar secuencias
 def pad_or_truncate_sequence(seq, max_frames=30):
@@ -35,16 +35,15 @@ def augment_sequence(seq):
     shift_x = np.random.uniform(-0.03, 0.03)
     shift_y = np.random.uniform(-0.03, 0.03)
     
-    augmented[:, 0::3] += shift_x  # x
-    augmented[:, 1::3] += shift_y  # y
+    augmented[:, 0::3] += shift_x  # Coordenadas X
+    augmented[:, 1::3] += shift_y  # Coordenadas Y
         
     return augmented
 
-print("Escaneando dataset...")
+# Carga de datos base
+print("Escaneando dataset (extrayendo únicamente archivos base)...")
 
 sequences, labels = [], []
-
-# Mapeo dinámico de carpetas
 label_map = {}
 current_label_id = 0
 
@@ -59,8 +58,6 @@ for word_folder in os.listdir(DATA_PATH):
         current_label_id += 1
         
     label_id = label_map[word_folder]
-    
-    # Cargar todos los archivos .npy en la carpeta
     npy_files = glob.glob(os.path.join(folder_path, "*.npy"))
     
     for file_path in npy_files:
@@ -73,34 +70,61 @@ for word_folder in os.listdir(DATA_PATH):
         if len(seq) == 0:
             continue
             
-        # Estandarizar la longitud
+        # Estandarizar la longitud de la secuencia real
         seq = pad_or_truncate_sequence(seq, MAX_FRAMES)
         
-        # Original
+        # Almacenamos únicamente el archivo real original
         sequences.append(seq)
         labels.append(label_id)
-        
-        # Evitamos el aumento infinito si ya es un archivo aumentado ('aug' en el nombre)
-        # Solo aumentamos los archivos "originales" y los "nuevos" que grabaste para darle un pequeño impulso
-        if 'aug' not in os.path.basename(file_path):
-            for _ in range(AUGMENTATION_MULTIPLIER):
-                aug_seq = augment_sequence(seq)
-                sequences.append(aug_seq)
-                labels.append(label_id)
 
-X = np.array(sequences)
-y = to_categorical(labels).astype(int)
+X_raw = np.array(sequences)
+y_raw = np.array(labels)
 
-# Guardar el mapa de etiquetas para usar en translate.py
-OUTPUT_PATH = "C:/TFG/Sign-Language-Recognition-LSE-/LSE-Sign-Language-Recognition"
+# Guardar el mapa de etiquetas mapeado dinámicamente
 np.save(os.path.join(OUTPUT_PATH, "label_map_propio.npy"), label_map)
 
-print(f"Datos cargados. X shape: {X.shape}, y shape: {y.shape}")
-print(f"Palabras detectadas ({len(label_map)}): {list(label_map.keys())}")
+print(f" -> Muestras base originales cargadas: {X_raw.shape[0]}")
+print(f" -> Glosas detectadas ({len(label_map)}): {list(label_map.keys())}")
 
-# Dividir en entrenamiento y validación
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.20, random_state=42)
+# Extracción del conjunto de validación
+# Dividimos primero para aislar un 20% de datos reales puros que la IA jamás verá al entrenar
+# El parámetro 'stratify' garantiza un reparto equitativo de muestras por clase
+X_train_raw, X_val_raw, y_train_raw, y_val_raw = train_test_split(
+    X_raw, y_raw, test_size=0.20, random_state=42, stratify=y_raw
+)
 
+print(f" -> Muestras base destinadas a Entrenamiento: {len(X_train_raw)}")
+print(f" -> Muestras base destinadas a Validación Pura: {len(X_val_raw)}")
+
+# Aumento de datos sobre el set de entrenamiento sin tocar el de validacion
+print("\nAplicando técnicas de Data Augmentation sobre el conjunto de entrenamiento...")
+X_train_augmented = []
+y_train_augmented = []
+
+for seq, label in zip(X_train_raw, y_train_raw):
+    # Guardar el archivo real base en el set de entrenamiento
+    X_train_augmented.append(seq)
+    y_train_augmented.append(label)
+    
+    # Generar los clones sintéticos con ruido exclusivamente para el entrenamiento
+    for _ in range(AUGMENTATION_MULTIPLIER):
+        aug_seq = augment_sequence(seq)
+        X_train_augmented.append(aug_seq)
+        y_train_augmented.append(label)
+
+# Conversión a arrays finales transformando etiquetas a matrices categóricas (One-Hot)
+X_train = np.array(X_train_augmented)
+y_train = to_categorical(y_train_augmented, num_classes=len(label_map)).astype(int)
+
+# El conjunto de validación se procesa en limpio, sin alteración de ruido ni clones
+X_val = X_val_raw
+y_val = to_categorical(y_val_raw, num_classes=len(label_map)).astype(int)
+
+print("Estructura definitiva de datos completada con éxito:")
+print(f" -> Matriz X_train (Con aumento): {X_train.shape}, y_train: {y_train.shape}")
+print(f" -> Matriz X_val (Reales limpios): {X_val.shape}, y_val: {y_val.shape}\n")
+
+# Arquitectura del modelo BilSTM
 print("Construyendo el modelo BiLSTM...")
 
 model = Sequential([
@@ -120,7 +144,7 @@ model = Sequential([
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
 
-# --- ENTRENAMIENTO ---
+# Ejecucion del entrenamiento
 print("Empezando el entrenamiento...")
 
 callbacks = [
@@ -136,8 +160,10 @@ history = model.fit(
     callbacks=callbacks
 )
 
+# Guardar el modelo óptimo final
 model.save(os.path.join(OUTPUT_PATH, 'bilstm_model.h5'))
-print("Modelo guardado como bilstm_model.h5")
+print("\nModelo guardado de forma segura como: bilstm_model.h5")
 
+# Guardar logs de entrenamiento para graficar pérdida/precisión en la memoria
 np.save(os.path.join(OUTPUT_PATH, 'historial_entrenamiento.npy'), history.history)
-print("Historial de entrenamiento guardado como historial_entrenamiento.npy")
+print("Historial de entrenamiento guardado como: historial_entrenamiento.npy")
