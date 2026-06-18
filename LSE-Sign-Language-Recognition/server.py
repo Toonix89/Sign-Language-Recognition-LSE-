@@ -23,7 +23,7 @@ model = load_model('bilstm_model.h5')
 
 if os.path.exists('label_map_propio.npy'):
     label_map = np.load('label_map_propio.npy', allow_pickle=True).item()
-    list_actions = {v: k for k, v in label_map.items()} # Dar la vuelta al diccionario (HOLA: 0 -> 0: HOLA)
+    list_actions = {v: k for k, v in label_map.items()} # Dar la vuelta al diccionario
     print(f"Words trained: {list(list_actions.values())}")
 else:
     print("ERROR: label_map_propio.npy not found.")
@@ -60,7 +60,7 @@ def process_frame(frame_bytes, hands_instance):
             hand_export = []
             
             label = results.multi_handedness[i].classification[0].label
-            start_idx = 0 if label == 'Left' else 63 # Separar izquierda de derecha)
+            start_idx = 0 if label == 'Left' else 63 # Separar izquierda de derecha
             
             for j, lm in enumerate(hand_lms.landmark):
                 idx = start_idx + (j * 3)
@@ -78,12 +78,13 @@ def process_frame(frame_bytes, hands_instance):
 def handle_connect():
     sid = request.sid
     print(f"Client connected: {sid}")
-    # Crear una instancia dedicada de MediaPipe y una lista de secuencias para este cliente
+    # Crear una instancia dedicada de MediaPipe, secuencias y buffer de palabras para este cliente
     client_data[sid] = {
         'sequence': [],
         'hands': mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7),
         'consecutive_count': 0,   # Cuántas veces seguidas se ha predicho la misma palabra
-        'last_prediction': None   # Última palabra detectada (evitar duplicados)
+        'last_prediction': None,   # Última palabra detectada (evitar duplicados inmediatos)
+        'buffer_glosas': []       # ✔️ NUEVO: Buffer de palabras aislado por cliente
     }
 
 @socketio.on('disconnect')
@@ -124,7 +125,7 @@ def handle_video_frame(data):
         confidence = float(res[max_idx])
         word = list_actions[max_idx]
 
-        # Filtro de reposo estricto con los paréntesis de tu dataset entrenado
+        # Filtro de reposo estricto
         if word == "(Reposo)" or confidence < threshold:
             client_data[sid]['consecutive_count'] = 0
         else:
@@ -138,10 +139,11 @@ def handle_video_frame(data):
                 prediction_result['word'] = word
                 prediction_result['confidence'] = int(confidence * 100)
                 
-                # Se guarda la palabra de forma segura en la lista interna
-                sign_buffer_manager.add_word(word)
-                emit('word_added', {'buffer': sign_buffer_manager.buffer})
+                # Se guarda la palabra en el buffer local del cliente
+                client_data[sid]['buffer_glosas'].append(word)
                 
+                # Emitimos el buffer específico de este cliente de vuelta a su interfaz
+                emit('word_added', {'buffer': client_data[sid]['buffer_glosas']})
                 
                 client_data[sid]['sequence'] = []
                 client_data[sid]['consecutive_count'] = 0
@@ -154,18 +156,25 @@ def handle_trigger_translation():
     sid = request.sid
     print(f"[Socket.IO] El cliente {sid} ha solicitado la traducción de la frase.")
     
-    frase_final = sign_buffer_manager.translate_current_buffer()
+    if sid not in client_data:
+        return
+
+    buffer_usuario = client_data[sid]['buffer_glosas']
+    frase_final = sign_buffer_manager.translate_current_buffer(buffer_usuario)
+    
+    client_data[sid]['last_prediction'] = None
     
     if frase_final:
-        print(f"[Socket.IO] Enviando frase estructurada a la interfaz web: '{frase_final}'")
-        # Se le inyecta la frase en el canal global para actualizar la UI de React
+        print(f"[Socket.IO] Enviando frase estructurada al cliente {sid}: '{frase_final}'")
         emit('translation_result', {'sentence': frase_final})
 
 @socketio.on('clear_buffer')
 def handle_clear_buffer():
-    sign_buffer_manager.buffer.clear()
-    sign_buffer_manager.last_word = None
-    print(f"[Socket.IO] Buffer limpiado por el cliente {request.sid}")
+    sid = request.sid
+    print(f"[Socket.IO] Buffer limpiado por el cliente {sid}")
+    if sid in client_data:
+        client_data[sid]['buffer_glosas'].clear()
+        client_data[sid]['last_prediction'] = None
 
 if __name__ == '__main__':
     print("Starting Socket.IO server on port 5000...")

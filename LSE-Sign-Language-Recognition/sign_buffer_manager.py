@@ -39,16 +39,17 @@ def add_word(word: str):
         print(f"[Buffer] Palabra guardada: {word} | Buffer actual: {buffer}")
 
 
-def translate_current_buffer() -> str:
-    #Traduce todo lo acumulado, limpia el buffer y devuelve la frase.
-    global buffer, last_word
-
-    if not buffer:
+def translate_current_buffer(lista_glosas: list) -> str:
+    # Traduce todo lo acumulado de un usuario, limpia su buffer local y devuelve la frase.
+    if not lista_glosas:
         return ""
 
-    glosses_to_translate = buffer.copy()
-    buffer.clear()
-    last_word = None
+    # Copiamos las glosas actuales para procesar
+    glosses_to_translate = lista_glosas.copy()
+    
+    # Al ser las listas objetos mutables pasados por referencia, 
+    # este clear() vacía directamente el buffer del usuario dentro de client_data[sid]
+    lista_glosas.clear()
 
     gloss_str = ", ".join(glosses_to_translate)
     print(f"[Ollama] Traduciendo: {glosses_to_translate}")
@@ -71,18 +72,18 @@ def translate_current_buffer() -> str:
             timeout=30,
         )
         response.raise_for_status()
-        translated = response.json()["response"].strip()
+        data = response.json()
+
+        if 'total_duration' in data:
+            milisegundos = data['total_duration'] / 1_000_000
+            print(f"[Ollama] Inferencia completada en: {milisegundos:.2f} ms")
+
+        translated = data["response"].strip()
         print(f"[Ollama] Traducción: '{translated}'")
         return translated
 
     except Exception as e:
         print(f"[Error Ollama]: {e}")
         fallback = f"{' '.join(glosses_to_translate).lower().capitalize()}."
-        print(f"[Ollama] Fallback: '{fallback}'")
+        print(f"[Ollama] Fallback (Sin IA): '{fallback}'")
         return fallback
-    
-    data = response.json()
-
-    if 'total_duration' in data:
-        milisegundos = data['total_duration'] / 1_000_000
-        print(f"Ollama ha tardado: {milisegundos:.2f} ms")

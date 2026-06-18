@@ -109,6 +109,7 @@ function App() {
 
     socketRef.current.on('word_added', (data) => {
       setWordBuffer(data.buffer);
+      setSentence('');
     });
 
     socketRef.current.on('translation_result', (data) => {
