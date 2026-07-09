@@ -83,8 +83,8 @@ def handle_connect():
         'sequence': [],
         'hands': mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7),
         'consecutive_count': 0,   # Cuántas veces seguidas se ha predicho la misma palabra
-        'last_prediction': None,   # Última palabra detectada (evitar duplicados inmediatos)
-        'buffer_glosas': []       # ✔️ NUEVO: Buffer de palabras aislado por cliente
+        'last_prediction': None,  # Última palabra detectada (evitar duplicados inmediatos)
+        'buffer_glosas': []       # Buffer de palabras aislado por cliente
     }
 
 @socketio.on('disconnect')

@@ -45,7 +45,7 @@ function App() {
     selectedVoiceRef.current = selectedVoice;
   }, [selectedVoice]);
 
-  // Inicializar webcam pidiendo permisos de VÍDEO y AUDIO simultáneamente
+  // Inicializar webcam pidiendo permisos de VÍDEO y AUDIO
   useEffect(() => {
     const startVideo = async () => {
       try {
@@ -173,7 +173,7 @@ function App() {
         }
       }, 50);
     } else if (!isAiActive) {
-      // Si apagamos la IA, limpiamos la pantalla sin pisar el estado si el micro está escuchando
+      // Si apagamos la IA, limpiamos la pantalla
       setSubtitle(prev => (isMuted ? "..." : prev));
       setLandmarks([]);
       isProcessingRef.current = false;
@@ -195,10 +195,10 @@ function App() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Dibuja los puntos sobre la imagen reflejada de la webcam
+    // Dibuja los puntos de la mano
     if (showMesh && landmarks.length > 0) {
       landmarks.forEach(hand => {
-        ctx.fillStyle = '#06b6d4'; // Color azul/cian configurado
+        ctx.fillStyle = '#06b6d4';
         hand.landmarks.forEach(lm => {
           ctx.beginPath();
           ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, 2 * Math.PI);
@@ -208,7 +208,7 @@ function App() {
     }
   }, [landmarks, showMesh]);
 
-  // Reconocimiento de Voz (Speech-to-Text integrado de forma síncrona)
+  // Reconocimiento de Voz
   useEffect(() => {
     if (!recognition) return;
 
@@ -225,7 +225,7 @@ function App() {
     recognition.onresult = (event) => {
       const currentResultIndex = event.resultIndex;
       const transcript = event.results[currentResultIndex][0].transcript;
-      setSubtitle(transcript); // Inyecta la voz directamente en el subtítulo común
+      setSubtitle(transcript);
     };
 
     recognition.onend = () => {
@@ -274,7 +274,7 @@ function App() {
               ref={videoRef}
               autoPlay
               playsInline
-              muted // CRITICAL: Silencia el retorno del propio PC para evitar acoples de sonido e interferencias
+              muted // Silencia el retorno del propio PC para evitar acoples de sonido e interferencias
               className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : 'block'}`}
               style={{ transform: 'scaleX(-1)' }}
             />
